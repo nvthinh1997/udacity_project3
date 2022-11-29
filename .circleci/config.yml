@@ -1,6 +1,18 @@
 version: 2.1
 
 commands:
+  destroy-environment:
+    description: Destroy back-end and front-end cloudformation stacks given a workflow ID.
+    parameters:
+      # Add parameter here   
+    steps:
+      - run:
+          name: Destroy environments
+          when: on_fail
+          command: |
+            # Your code here
+            exit 1
+
   deploy-infrastructure:
     docker:
       - image: amazon/aws-cli:latest
@@ -47,18 +59,6 @@ commands:
       - destroy-environment:
           workflow_id: ${CIRCLE_WORKFLOW_ID:0:7}
           
-  destroy-environment:
-    description: Destroy back-end and front-end cloudformation stacks given a workflow ID.
-    parameters:
-      # Add parameter here   
-    steps:
-      - run:
-          name: Destroy environments
-          when: on_fail
-          command: |
-            # Your code here
-            exit 1
-
   revert-migrations:
     description: Revert the last migration if successfully run in the current workflow.  
     steps:
@@ -276,4 +276,11 @@ workflows:
           requires: [build-backend]
       - scan-frontend:
           requires: [build-frontend]
+      - deploy-infrastructure:
+        requires: [test-frontend, test-backend, scan-frontend, scan-backend]
+        filters:
+          branches:
+            only: [test-feature-branch]
+    - configure-infrastructure:
+        requires: [deploy-infrastructure]    
 
