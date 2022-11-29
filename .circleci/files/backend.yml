@@ -1,5 +1,6 @@
 Description: >
   UdaPeople backend stack.
+
 Parameters:
   ID:
     Description: Unique identifier.
@@ -35,7 +36,7 @@ Resources:
       InstanceType: t2.micro
       SecurityGroups:
         - Ref: InstanceSecurityGroup
-      KeyName: udacity 
+      KeyName: udacity
       ImageId: ami-068663a3c619dd892                   
       Tags:
         - Key: Name

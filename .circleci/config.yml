@@ -3,7 +3,32 @@ version: 2.1
 orbs:
   slack: circleci/slack@4.9.3
 
-commands:
+commands:  
+  install_awscli:
+    description: Install AWS CLI
+    steps:
+      - run:
+          name: Install AWS CLI
+          command: |
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+
+  destroy-environment:
+    description: Destroy back-end and front-end cloudformation stacks given a workflow ID.
+    parameters:
+      Workflow_ID:
+        type: string
+        default: ${CIRCLE_WORKFLOW_ID:0:7} 
+    steps:
+      - run:
+          name: Destroy environments
+          when: on_fail
+          command: |          
+            aws s3 rm s3://udapeople-<<parameters.Workflow_ID>> --recursive
+            aws cloudformation delete-stack --stack-name "udapeople-backend-<<parameters.Workflow_ID>>"
+            aws cloudformation delete-stack --stack-name "udapeople-frontend-<<parameters.Workflow_ID>>"            
+  
   notify_on_failure:
     steps:
       - slack/notify:
@@ -22,47 +47,24 @@ commands:
             sudo add-apt-repository --yes --update ppa:ansible/ansible
             sudo apt install ansible -y
 
-  destroy-environment:
-    description: Destroy back-end and front-end cloudformation stacks given a workflow ID.
+  revert-migrations:
+    description: Revert the last migration if successfully run in the current workflow.
     parameters:
       Workflow_ID:
         type: string
-        default: ${CIRCLE_WORKFLOW_ID:0:7} 
-    steps:
-      - run:
-          name: Destroy environments
-          when: on_fail
-          command: |          
-            aws s3 rm s3://udapeople-<<parameters.Workflow_ID>> --recursive
-            aws cloudformation delete-stack --stack-name "udapeople-backend-<<parameters.Workflow_ID>>"
-            aws cloudformation delete-stack --stack-name "udapeople-frontend-<<parameters.Workflow_ID>>"
-          
-  revert-migrations:
-    description: Revert the last migration if successfully run in the current workflow.  
+        default: ${CIRCLE_WORKFLOW_ID:0:7}
     steps:
       - run:
           name: Revert migrations
-          # Add when this will run
+          when: on_fail
           command: |
-            # Curl command here to see if there was a successful migration associated with the workflow id, store result in SUCCESS variable
-            SUCCESS = 1
+            SUCCESS=$(curl --insecure https://kvdb.io/LyiuxpMRKC1Sxz8RmReZBJ/migration_<<parameters.Workflow_ID>>)
             if(( $SUCCESS==1 )); 
             then
-            #  cd ~/project/backend
-            #  npm install
-            #  Add revert code here. You can find this in the Getting Started section.
-              exit 1
+              cd ~/project/backend
+              npm install
+              npm run migration:revert
             fi
-  
-  install_awscli:
-    description: Install AWS CLI
-    steps:
-      - run:
-          name: Install AWS CLI
-          command: |
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install           
 
   install_nodejs:
     description: Install Node.js
@@ -165,6 +167,7 @@ jobs:
             cd backend
             npm install            
             npm audit fix --force
+
   deploy-infrastructure:
     docker:
       - image: cimg/base:stable
@@ -187,6 +190,7 @@ jobs:
               --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
               --tags project=udapeople
+
       - run:
           name: Add back-end ip to ansible inventory
           command: |
@@ -208,29 +212,23 @@ jobs:
 
   configure-infrastructure:
     docker:
-      - image: python:3
+      - image: cimg/base:stable
     steps:
       - checkout
+      - install_ansible
       - add_ssh_keys:
           fingerprints: ["f7:d7:d4:bf:d5:40:21:4e:be:74:5a:0b:62:7a:42:28:1e:00:73:4a"]
-      - run:
-          name: Install dependencies
-          command: |
-            apt-get update
-            apt-get install -y curl
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            ./aws/install
-            apt-get install -y ansible
       - attach_workspace:
           at: ~/
       - run:
           name: Configure server
-          no_output_timeout: 30m
           command: |
             cd .circleci/ansible
-            cat inventory.txt
-            ansible-playbook -i inventory.txt configure-server.yml -vv
+                      
+            cat inventory.txt                                        
+            ansible-playbook -i inventory.txt configure-server.yml
+
+      - notify_on_failure
       - destroy-environment
 
   run-migrations:
@@ -285,6 +283,7 @@ jobs:
             cd frontend
             npm run build            
             aws s3 cp dist s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7} --recursive
+
       - notify_on_failure
       - destroy-environment
       - revert-migrations
@@ -323,10 +322,10 @@ jobs:
             export TYPEORM_ENTITIES=./modules/domain/**/*.entity{.ts,.js}
             export TYPEORM_MIGRATIONS=./migrations/*.ts
             cd .circleci/ansible
-        
             cat inventory.txt
             export ANSIBLE_HOST_KEY_CHECKING=False
             ansible-playbook -i inventory.txt deploy-backend.yml                                               
+
       - notify_on_failure
       - destroy-environment
       - revert-migrations
@@ -390,6 +389,7 @@ jobs:
                       --no-paginate --output text)
             echo "Old Workflow ID: $OLD_WORKFLOW_ID"
             curl https://kvdb.io/LyiuxpMRKC1Sxz8RmReZBJ/old_workflow_id -d "${OLD_WORKFLOW_ID}"
+
             echo old worklow id: '${OLD_WORKFLOW_ID}'
             echo curent worklow id: '${CIRCLE_WORKFLOW_ID}'
       - destroy-environment
@@ -409,12 +409,12 @@ jobs:
             echo CIRCLE_WORKFLOW_ID "${CIRCLE_WORKFLOW_ID:0:7}"
             if [[ "${CIRCLE_WORKFLOW_ID:0:7}" == "${OldWorkflowID}" ]]
             then
-              echo 'Delete confirm'
+              echo '--Delete confirm--'
               aws s3 rm s3://udapeople-${OldWorkflowID} --recursive
               aws cloudformation delete-stack --stack-name "udapeople-backend-${OldWorkflowID}"
               aws cloudformation delete-stack --stack-name "udapeople-frontend-${OldWorkflowID}"
             else
-              echo 'Cannot Cleanup'
+              echo '--Cannot cleanup--'
             fi
   
   notify_on_success:
@@ -425,7 +425,6 @@ jobs:
           event: pass
           channel: notification_failed_cicd
           template: success_tagged_deployment_1
- 
 
 workflows:
   default:
@@ -435,11 +434,11 @@ workflows:
       - test-frontend:
           requires: [build-frontend]
       - test-backend:
-          requires: [build-backend]
-      - scan-backend:
-          requires: [build-backend]
+          requires: [build-backend] 
       - scan-frontend:
           requires: [build-frontend]
+      - scan-backend:
+          requires: [build-backend]
       - deploy-infrastructure:
           requires: [test-frontend, test-backend, scan-frontend, scan-backend]
       - configure-infrastructure:
@@ -456,4 +455,5 @@ workflows:
           requires: [smoke-test]
       - cleanup:
           requires: [cloudfront-update]
-
+      - notify_on_success:
+          requires: [cloudfront-update]            
