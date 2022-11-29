@@ -101,7 +101,7 @@ jobs:
       - run:
           name: Back-end build
           command: |
-            cd frontend
+            cd backend
             npm install
             npm run build
       - save_cache:
@@ -114,74 +114,70 @@ jobs:
     steps:
       - checkout
       - restore_cache:
-          keys: [test-frontend]
-      - run:
-          name: test-frontend build
+          keys: [front-test]
+      - run: 
+          name: test front-end
           command: |
             cd frontend
             npm install
             npm run test
-                
+  
   test-backend:
     docker:
       - image: circleci/node:13.8.0
     steps:
       - checkout
       - restore_cache:
-          keys: [test-backend]
+          keys: [backend-test]
       - run:
-          name: test-backend build
+          name: test back-end
           command: |
             cd backend
             npm install
             npm run test
-            
+  
   scan-frontend:
     docker:
       - image: circleci/node:13.8.0
     steps:
       - checkout
       - restore_cache:
-          keys: [scan-frontend]
+          keys: [frontend-scan]
       - run:
-          name: scan-frontend build
+          name: scan-frontend
           command: |
             cd frontend            
             npm install 
             npm update
             npm audit fix --force --audit-level=critical
             npm audit --audit-level=critical
-
+  
   scan-backend:
     docker:
       - image: circleci/node:13.8.0
     steps:
       - checkout
       - restore_cache:
-          keys: [scan-backend]
+          keys: [backend-scan]
       - run:
-          name: scan-backendbuild
+          name: scan-backend
           command: |
             cd backend
             npm install            
             npm audit fix --force
-
   deploy-infrastructure:
     docker:
-      - image: amazon/aws-cli
+      - image: cimg/base:stable
     steps:
       - checkout
-      - run:
-          name: Install tar and gzip
-          command: |
-            yum install -y tar gzip
+      - install_awscli
       - run:
           name: Ensure back-end infrastructure exists
-          command: |
+          command: |          
             aws cloudformation deploy \
               --template-file .circleci/files/backend.yml \
               --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}" \
-              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
+              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}" \
               --tags project=udapeople
       - run:
           name: Ensure front-end infrastructure exist
@@ -194,17 +190,20 @@ jobs:
       - run:
           name: Add back-end ip to ansible inventory
           command: |
-            echo [web] > .circleci/ansible/inventory.txt
-            aws ec2 describe-instances \
+            BACKEND_PUBLIC_IP=$(aws ec2 describe-instances \
               --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --query 'Reservations[*].Instances[*].PublicIpAddress' \
-              --output text >> .circleci/ansible/inventory.txt
-            echo $(pwd)
+              --output text
+            )
+            echo $BACKEND_PUBLIC_IP >> .circleci/ansible/inventory.txt
             cat .circleci/ansible/inventory.txt
+            
       - persist_to_workspace:
           root: ~/
           paths:
             - project/.circleci/ansible/inventory.txt
+
+      - notify_on_failure
       - destroy-environment
 
   configure-infrastructure:
